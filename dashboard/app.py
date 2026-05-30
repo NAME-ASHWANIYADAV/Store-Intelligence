@@ -31,6 +31,7 @@ st.set_page_config(
 # ─── Constants ────────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent.parent
 JSONL_PATH = PROJECT_ROOT / "output" / "v3" / "STORE_BLR_001_v3.jsonl"
+FALLBACK_PATH = PROJECT_ROOT / "dashboard" / "sample_data.jsonl"
 STORE_ID = "STORE_BLR_001"
 
 # Palette
