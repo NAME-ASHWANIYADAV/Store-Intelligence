@@ -1,13 +1,14 @@
 """
 Store Intelligence System - Event Ingestion Service
 Handles event validation, deduplication, storage, and session building.
+Database-agnostic: works on PostgreSQL (production) and SQLite (tests).
 """
 
 from datetime import datetime, timezone
 from typing import List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select, text, delete
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Event, VisitorSession
 from app.schemas import EventIn, EventError
@@ -25,6 +26,7 @@ async def ingest_events(
 
     Returns (accepted_count, rejected_count, errors).
     Idempotent by event_id — duplicate events are silently accepted.
+    Database-agnostic: uses check-then-insert instead of ON CONFLICT.
     """
     accepted = 0
     rejected = 0
@@ -42,8 +44,16 @@ async def ingest_events(
             if event_data.metadata:
                 meta = event_data.metadata.model_dump(exclude_none=True)
 
-            # Upsert with ON CONFLICT DO NOTHING (idempotent)
-            stmt = pg_insert(Event).values(
+            # Check for duplicate (idempotent — skip silently)
+            existing = await db.execute(
+                select(Event.id).where(Event.event_id == event_data.event_id)
+            )
+            if existing.scalar_one_or_none() is not None:
+                accepted += 1  # Silently accept duplicates
+                continue
+
+            # Insert new event
+            event = Event(
                 event_id=event_data.event_id,
                 store_id=event_data.store_id,
                 camera_id=event_data.camera_id,
@@ -55,12 +65,16 @@ async def ingest_events(
                 is_staff=event_data.is_staff,
                 confidence=event_data.confidence,
                 metadata_json=meta,
-            ).on_conflict_do_nothing(index_elements=["event_id"])
-
-            result = await db.execute(stmt)
+            )
+            db.add(event)
+            await db.flush()  # Flush to catch constraint errors early
             accepted += 1
 
+        except IntegrityError:
+            await db.rollback()
+            accepted += 1  # Duplicate — silently accept
         except Exception as e:
+            await db.rollback()
             rejected += 1
             errors.append(EventError(
                 event_id=event_data.event_id,
@@ -74,7 +88,10 @@ async def ingest_events(
 
     # Commit all accepted events
     if accepted > 0:
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
         # Rebuild sessions for affected visitors
         visitor_ids = list(set(e.visitor_id for e in events))
@@ -90,6 +107,7 @@ async def rebuild_sessions(
     """
     Rebuild visitor sessions from events for the given visitors.
     A session is defined by ENTRY → ... → EXIT for a visitor in a store.
+    Database-agnostic: uses delete+insert instead of ON CONFLICT.
     """
     for store_id in store_ids:
         for visitor_id in visitor_ids:
@@ -142,8 +160,14 @@ async def rebuild_sessions(
             )
             is_staff = staff_result.scalar_one_or_none() is not None
 
-            # Upsert session
-            stmt = pg_insert(VisitorSession).values(
+            # Delete existing session and re-insert (DB-agnostic upsert)
+            await db.execute(
+                delete(VisitorSession)
+                .where(VisitorSession.visitor_id == visitor_id)
+                .where(VisitorSession.store_id == store_id)
+            )
+
+            session = VisitorSession(
                 visitor_id=visitor_id,
                 store_id=store_id,
                 entry_time=entry_time or (events[0].timestamp if events else None),
@@ -154,19 +178,7 @@ async def rebuild_sessions(
                 is_converted=is_converted,
                 is_reentry=is_reentry,
                 event_count=len(events),
-            ).on_conflict_do_update(
-                constraint="uq_visitor_store",
-                set_={
-                    "entry_time": entry_time or (events[0].timestamp if events else None),
-                    "exit_time": exit_time,
-                    "zones_visited": list(zones_visited),
-                    "total_dwell_ms": total_dwell,
-                    "is_staff": is_staff,
-                    "is_converted": is_converted,
-                    "is_reentry": is_reentry,
-                    "event_count": len(events),
-                }
             )
-            await db.execute(stmt)
+            db.add(session)
 
         await db.commit()

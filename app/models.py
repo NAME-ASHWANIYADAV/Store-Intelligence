@@ -17,7 +17,7 @@ class Event(Base):
     """Stores all ingested behavioral events from the detection pipeline."""
     __tablename__ = "events"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(String(64), unique=True, nullable=False, index=True)
     store_id = Column(String(32), nullable=False, index=True)
     camera_id = Column(String(32), nullable=False)
@@ -58,13 +58,13 @@ class VisitorSession(Base):
     """Aggregated visitor session built from events."""
     __tablename__ = "visitor_sessions"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     visitor_id = Column(String(32), nullable=False, index=True)
     store_id = Column(String(32), nullable=False, index=True)
     entry_time = Column(DateTime(timezone=True), nullable=True)
     exit_time = Column(DateTime(timezone=True), nullable=True)
     zones_visited = Column(JSON, default=list)
-    total_dwell_ms = Column(BigInteger, default=0)
+    total_dwell_ms = Column(Integer, default=0)
     is_staff = Column(Boolean, default=False)
     is_converted = Column(Boolean, default=False)
     is_reentry = Column(Boolean, default=False)

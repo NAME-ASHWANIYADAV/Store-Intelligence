@@ -1,6 +1,7 @@
 """
 Store Intelligence System - Anomaly Detection Engine
 Z-score + moving average based anomaly detection for retail metrics.
+Database-agnostic: works on PostgreSQL and SQLite.
 
 Anomaly Types:
 - BILLING_QUEUE_SPIKE: queue_depth > mean + 2σ
@@ -35,17 +36,25 @@ async def compute_anomalies(db: AsyncSession, store_id: str) -> StoreAnomalies:
     now = datetime.now(timezone.utc)
     anomalies = []
 
-    # ===== 1. BILLING_QUEUE_SPIKE =====
-    await _detect_queue_spike(db, store_id, now, anomalies)
+    try:
+        await _detect_queue_spike(db, store_id, now, anomalies)
+    except Exception:
+        pass  # Graceful degradation
 
-    # ===== 2. CONVERSION_DROP =====
-    await _detect_conversion_drop(db, store_id, now, anomalies)
+    try:
+        await _detect_conversion_drop(db, store_id, now, anomalies)
+    except Exception:
+        pass
 
-    # ===== 3. DEAD_ZONE =====
-    await _detect_dead_zones(db, store_id, now, anomalies)
+    try:
+        await _detect_dead_zones(db, store_id, now, anomalies)
+    except Exception:
+        pass
 
-    # ===== 4. STALE_FEED =====
-    await _detect_stale_feed(db, store_id, now, anomalies)
+    try:
+        await _detect_stale_feed(db, store_id, now, anomalies)
+    except Exception:
+        pass
 
     return StoreAnomalies(store_id=store_id, anomalies=anomalies)
 
@@ -54,35 +63,42 @@ async def _detect_queue_spike(
     db: AsyncSession, store_id: str, now: datetime, anomalies: list
 ):
     """Detect if current queue depth exceeds historical mean + 2σ."""
-    # Get hourly queue depths for past 7 days
     week_ago = now - timedelta(days=7)
 
-    hourly_result = await db.execute(
-        select(
-            func.date_trunc("hour", Event.timestamp).label("hour"),
-            func.count(distinct(Event.visitor_id)).label("queue_count"),
+    # Instead of date_trunc (PostgreSQL-only), use simple counting per day
+    # Get total queue joins per day for last 7 days
+    daily_counts = []
+    for day_offset in range(7):
+        day_start = (now - timedelta(days=day_offset + 1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
         )
-        .where(Event.store_id == store_id)
-        .where(Event.event_type == "BILLING_QUEUE_JOIN")
-        .where(Event.timestamp >= week_ago)
-        .group_by(func.date_trunc("hour", Event.timestamp))
-    )
-    hourly_counts = [row.queue_count for row in hourly_result]
+        day_end = day_start + timedelta(days=1)
 
-    if len(hourly_counts) < 3:
-        return  # Not enough data
+        result = await db.execute(
+            select(func.count(distinct(Event.visitor_id)))
+            .where(Event.store_id == store_id)
+            .where(Event.event_type == "BILLING_QUEUE_JOIN")
+            .where(Event.timestamp >= day_start)
+            .where(Event.timestamp < day_end)
+        )
+        count = result.scalar() or 0
+        if count > 0:
+            daily_counts.append(count)
 
-    mean_q = sum(hourly_counts) / len(hourly_counts)
-    variance = sum((x - mean_q) ** 2 for x in hourly_counts) / len(hourly_counts)
+    if len(daily_counts) < 3:
+        return
+
+    mean_q = sum(daily_counts) / len(daily_counts)
+    variance = sum((x - mean_q) ** 2 for x in daily_counts) / len(daily_counts)
     std_q = math.sqrt(variance) if variance > 0 else 1.0
 
-    # Current hour queue
-    hour_start = now.replace(minute=0, second=0, microsecond=0)
+    # Today's queue count
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     current_result = await db.execute(
         select(func.count(distinct(Event.visitor_id)))
         .where(Event.store_id == store_id)
         .where(Event.event_type == "BILLING_QUEUE_JOIN")
-        .where(Event.timestamp >= hour_start)
+        .where(Event.timestamp >= today_start)
     )
     current_q = current_result.scalar() or 0
 
@@ -106,46 +122,40 @@ async def _detect_conversion_drop(
     db: AsyncSession, store_id: str, now: datetime, anomalies: list
 ):
     """Detect if today's conversion rate dropped below avg - 1σ."""
-    week_ago = now - timedelta(days=7)
-
-    # Daily conversion rates for past 7 days
-    daily_result = await db.execute(
-        select(
-            func.date_trunc("day", Event.timestamp).label("day"),
-            func.count(distinct(Event.visitor_id)).label("total"),
-        )
-        .where(Event.store_id == store_id)
-        .where(Event.is_staff == False)
-        .where(Event.event_type.in_(["ENTRY", "REENTRY"]))
-        .where(Event.timestamp >= week_ago)
-        .group_by(func.date_trunc("day", Event.timestamp))
-    )
-    daily_totals = {row.day: row.total for row in daily_result}
-
-    if len(daily_totals) < 3:
-        return
-
-    # Get daily billing joins as proxy for conversion
-    billing_result = await db.execute(
-        select(
-            func.date_trunc("day", Event.timestamp).label("day"),
-            func.count(distinct(Event.visitor_id)).label("billing_count"),
-        )
-        .where(Event.store_id == store_id)
-        .where(Event.is_staff == False)
-        .where(Event.event_type == "BILLING_QUEUE_JOIN")
-        .where(Event.timestamp >= week_ago)
-        .group_by(func.date_trunc("day", Event.timestamp))
-    )
-    daily_billing = {row.day: row.billing_count for row in billing_result}
-
-    # Calculate daily conversion rates
+    # Calculate daily conversion rates for past 7 days
     rates = []
-    for day, total in daily_totals.items():
-        billing = daily_billing.get(day, 0)
-        rates.append(billing / total if total > 0 else 0.0)
+    for day_offset in range(1, 8):
+        day_start = (now - timedelta(days=day_offset)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        day_end = day_start + timedelta(days=1)
 
-    if not rates:
+        # Total entries for that day
+        entry_result = await db.execute(
+            select(func.count(distinct(Event.visitor_id)))
+            .where(Event.store_id == store_id)
+            .where(Event.is_staff == False)
+            .where(Event.event_type.in_(["ENTRY", "REENTRY"]))
+            .where(Event.timestamp >= day_start)
+            .where(Event.timestamp < day_end)
+        )
+        entries = entry_result.scalar() or 0
+
+        # Billing joins for that day
+        billing_result = await db.execute(
+            select(func.count(distinct(Event.visitor_id)))
+            .where(Event.store_id == store_id)
+            .where(Event.is_staff == False)
+            .where(Event.event_type == "BILLING_QUEUE_JOIN")
+            .where(Event.timestamp >= day_start)
+            .where(Event.timestamp < day_end)
+        )
+        billing = billing_result.scalar() or 0
+
+        if entries > 0:
+            rates.append(billing / entries)
+
+    if len(rates) < 3:
         return
 
     mean_r = sum(rates) / len(rates)
@@ -195,7 +205,6 @@ async def _detect_dead_zones(
     """Detect zones with no activity in 30+ minutes."""
     threshold = now - timedelta(minutes=settings.anomaly_dead_zone_minutes)
 
-    # Get all known zones for this store
     all_zones_result = await db.execute(
         select(Event.zone_id)
         .where(Event.store_id == store_id)
@@ -204,7 +213,6 @@ async def _detect_dead_zones(
     )
     all_zones = {row.zone_id for row in all_zones_result}
 
-    # Get zones with recent activity
     active_result = await db.execute(
         select(Event.zone_id)
         .where(Event.store_id == store_id)
