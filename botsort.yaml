@@ -1,5 +1,6 @@
 # BoT-SORT Tracker Configuration for Store Intelligence
 # Tuned for retail CCTV person tracking with ReID
+# Compatible with ultralytics 8.4.x
 
 tracker_type: botsort
 
@@ -9,14 +10,13 @@ track_low_thresh: 0.1       # Low confidence threshold for second association
 new_track_thresh: 0.6       # Threshold for creating new tracks
 track_buffer: 45            # Frames to keep lost tracks (3 sec at 15fps)
 match_thresh: 0.8           # Matching threshold for association
-
-# ReID Configuration - ENABLED for identity retention
-with_reid: true
-model: auto                 # Use YOLO11 native features for ReID
-
-# Kalman Filter
-proximity_thresh: 0.5
-appearance_thresh: 0.25
+fuse_score: true            # Fuse detection score with IoU
 
 # Camera Motion Compensation
-cmc_method: sparseOptFlow   # Handle slight camera vibration
+gmc_method: sparseOptFlow   # Handle slight camera vibration
+
+# ReID Configuration - ENABLED for identity retention
+proximity_thresh: 0.5
+appearance_thresh: 0.25
+with_reid: true
+model: auto                 # Use YOLO11 native features for ReID

@@ -16,7 +16,7 @@ class PipelineConfig:
     """Configuration for the detection pipeline."""
 
     # Paths
-    data_dir: str = os.getenv("DATA_DIR", "./data")
+    data_dir: str = os.getenv("DATA_DIR", r"c:\Users\HP\OneDrive\Desktop\purplle\data")
     output_dir: str = os.getenv("OUTPUT_DIR", "./output/events")
     store_layout_path: str = ""
     pos_transactions_path: str = ""
