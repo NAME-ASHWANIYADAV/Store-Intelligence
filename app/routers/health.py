@@ -70,8 +70,14 @@ async def health_check(
     for row in store_result:
         last_event_ts = row.last_event
         status = "ACTIVE"
-        if last_event_ts and last_event_ts < stale_threshold:
-            status = "STALE_FEED"
+        if last_event_ts:
+            # Normalize: make both tz-aware or both naive for comparison
+            if last_event_ts.tzinfo is None:
+                compare_threshold = stale_threshold.replace(tzinfo=None)
+            else:
+                compare_threshold = stale_threshold
+            if last_event_ts < compare_threshold:
+                status = "STALE_FEED"
 
         stores[row.store_id] = StoreHealth(
             last_event=last_event_ts.isoformat() if last_event_ts else None,

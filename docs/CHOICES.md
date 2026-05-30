@@ -1,66 +1,76 @@
 # Store Intelligence System — Technical Choices
 
-This document captures three significant technical decisions made during development, including what AI tools suggested, what I ultimately chose, and the reasoning behind each override or acceptance.
+This document captures the three most impactful technical decisions made during development, including what AI tools suggested, what I ultimately chose, and the reasoning behind each override or acceptance.
 
 ---
 
-## Decision 1: Detection Model — YOLO11l
+## Decision 1: Detection Model — YOLO11-L with Native BoT-SORT
 
 ### Options Evaluated
 | Model | mAP (COCO) | Parameters | Speed | Key Feature |
 |-------|-----------|------------|-------|-------------|
 | YOLOv8x | ~53.9 | 68.2M | Baseline | Battle-tested, largest community |
 | YOLOv8l | ~52.9 | 43.7M | Faster | Smaller but lower accuracy |
-| **YOLO11l** | **~53.4** | **~25.3M** | **Faster** | **Native ReID, C2PSA attention** |
+| **YOLO11-L** | **~53.4** | **~25.3M** | **Faster** | **Native ReID, C2PSA attention** |
 | YOLOv12 | Highest | Very high | Slow | Research-grade, unstable |
 | RT-DETR | ~54.3 | 42M | Moderate | Transformer-based, NMS-free |
 
 ### What AI Suggested
-Claude initially recommended YOLOv8x as the "production standard" with the largest community and most tutorials. Gemini suggested considering RT-DETR for its transformer-based architecture.
+Claude initially recommended YOLOv8x as the "production standard" with the largest community. Gemini suggested considering RT-DETR for its transformer architecture.
 
 ### What I Chose and Why
-I chose **YOLO11l** for three specific reasons:
+I chose **YOLO11-L** for three specific reasons:
 
-1. **Native BoT-SORT with ReID**: YOLO11 includes BoT-SORT as a built-in tracker with `with_reid: True` support. This eliminates an entire dependency (separate BoT-SORT or Deep OC-SORT installation), reduces integration bugs, and simplifies the codebase. With YOLOv8x, I would need to either use its less-mature tracker integration or manage a separate tracking library.
+1. **Native BoT-SORT with ReID**: YOLO11 includes BoT-SORT as a built-in tracker with `with_reid: True` support. This eliminates an entire dependency (separate BoT-SORT or Deep OC-SORT installation), reduces integration bugs, and simplifies the codebase. With YOLOv8x, I would need to manage a separate tracking library.
 
-2. **C2PSA Spatial Attention for Retail**: The C2PSA (Cross Stage Partial with Spatial Attention) module in YOLO11 is specifically effective for partially occluded objects — a common scenario in retail aisles where customers are partially hidden behind shelves. This architectural advantage directly addresses our use case.
+2. **C2PSA Spatial Attention for Retail**: The C2PSA (Cross Stage Partial with Spatial Attention) module in YOLO11 is specifically effective for partially occluded objects — a common scenario in retail aisles where customers are partially hidden behind shelves and displays. This architectural advantage directly addresses our use case.
 
-3. **22% Fewer Parameters**: YOLO11l achieves comparable mAP with significantly fewer parameters. Since we're processing 5 video files, faster per-frame inference translates to meaningful total time savings. This matters for a hackathon where pipeline execution speed affects iteration cycles.
+3. **22% Fewer Parameters**: YOLO11-L achieves comparable mAP with significantly fewer parameters. On a GTX 1650 (4GB VRAM), this translates to faster inference and lower memory pressure, leaving room for the ResNet18 ReID model to run concurrently on the same GPU.
 
 I rejected RT-DETR despite its slightly higher mAP because it lacks the native tracking integration that YOLO11 provides, which would add ~4 hours of tracker integration work.
 
+### Validation
+- Processed 4 cameras (15,868 total frames) in ~1,100 seconds of detection time
+- Detected 61 raw person tracks across the store with high recall
+- No false positives from non-person objects (shelves, mannequins, displays)
+
 ---
 
-## Decision 2: Event Schema Design — Session-Based with Idempotent Ingestion
+## Decision 2: ReID Architecture — ResNet18 over Color Histograms
 
 ### Options Evaluated
-| Approach | Pros | Cons |
-|----------|------|------|
-| Raw frame-level events | Highest granularity | Massive data volume, complex aggregation |
-| **Session-based events with types** | **Balanced granularity, clear semantics** | **Requires session logic** |
-| Pre-aggregated metrics only | Simple API | Loses raw event traceability |
+| Approach | Dimensions | Accuracy | Speed | Training Required |
+|----------|-----------|----------|-------|-------------------|
+| Color histogram (HSV) | 192 | Low | Fast | None |
+| MobileNetV2 | 1280 | Medium | Fast | None (pretrained) |
+| **ResNet18** | **512** | **High** | **~2ms/crop** | **None (pretrained)** |
+| EfficientNet-B0 | 1280 | Higher | Slower | None (pretrained) |
+| OSNet (torchreid) | 512 | Highest | Moderate | Person ReID pretrained |
 
 ### What AI Suggested
-AI recommended a simple append-only event log with post-hoc aggregation. This would store every frame as an event and compute sessions lazily.
+AI initially recommended simple color histogram matching (HSV, 64 bins per channel) for "fast and lightweight ReID without any model dependencies." Multiple AI tools (Claude, Gemini) endorsed this approach.
 
 ### What I Chose and Why
-I designed a **typed event catalogue** (ENTRY, EXIT, ZONE_ENTER, ZONE_EXIT, ZONE_DWELL, BILLING_QUEUE_JOIN, BILLING_QUEUE_ABANDON, REENTRY) with **session_seq** numbering and **idempotent ingestion**.
 
-Key design decisions:
+I started with color histograms and it was a **disaster**: only **3.8% dedup rate** across the store. The fundamental problem is that histograms encode *what colors exist* but not *where they are*. Two different people wearing similar-colored clothing produce near-identical 192-dim vectors.
 
-1. **session_seq**: Each event within a visitor's journey gets a sequence number. This enables chronological replay of a visitor's path without relying on timestamp ordering (which can have clock drift issues across cameras). If I need to debug "why did funnel count this visitor twice?", I can trace their event sequence.
+I replaced it with **ResNet18** (pretrained on ImageNet, final FC layer removed, 512-dim L2-normalized output) after benchmarking:
 
-2. **confidence is never suppressed**: Every event carries the detection confidence from YOLO11. Low-confidence detections (0.25-0.5) are included rather than filtered because:
-   - Filtering creates silent data loss — you can't analyze what you didn't record
-   - The API consumer can filter by confidence if needed
-   - For anomaly detection, even low-confidence detections carry signal
+| Version | Approach | Total Tracks | Dedup Rate |
+|---------|----------|-------------|-----------|
+| v1.0 | No dedup | 83 | 0% |
+| v2.0 | Color histogram | 80 | 3.8% |
+| v2.1 | ResNet18 sequential | 36 | 41.0% |
+| **v3.0** | **ResNet18 + concurrent** | **29** | **52.5%** |
 
-3. **Idempotent by event_id**: Using `INSERT ... ON CONFLICT (event_id) DO NOTHING` means:
-   - Pipeline can be re-run safely without duplicate events
-   - Network retries are safe
-   - Testing is simpler (reset DB, re-ingest, compare)
+**Why ResNet18 specifically** (not MobileNetV2 or OSNet):
+- **512 dimensions** is a sweet spot — enough for discriminative power, small enough for fast cosine distance computation in the merger's O(n²) loop
+- **~2ms per crop on GTX 1650** — fits within the frame budget even at vid_stride=2
+- **ImageNet pretrained weights** are surprisingly effective for person appearance because they capture clothing textures, body proportions, and spatial patterns
+- **No person-ReID specific training needed** — OSNet would be slightly better but requires torchreid dependency and person-ReID weights, adding complexity
 
-4. **metadata is extensible**: The `metadata` JSON field carries event-specific data (queue_depth for BILLING_QUEUE_JOIN, sku_zone for future product-level tracking) without schema migration. This is a deliberate trade-off: structured fields for queried data, flexible JSON for context.
+### Key Insight (Where I Disagreed with AI)
+All 4 AI tools suggested **sequential-only** track merging. I discovered through manual video analysis that the billing counter camera (CAM_05) creates **concurrent duplicate IDs** when people cluster together. I designed a novel "Mode 2: Concurrent Merge" that handles overlapping tracks — this reduced CAM_01 from 10→7 and CAM_02 from 12→8 tracks.
 
 ---
 
@@ -80,16 +90,19 @@ AI initially suggested SQLite "for simplicity" since this is a hackathon project
 ### What I Chose and Why
 I chose **PostgreSQL** despite the higher complexity because:
 
-1. **Concurrent writes matter**: The pipeline writes events while the API serves queries. SQLite's write locking (even with WAL mode) creates contention. PostgreSQL handles this natively with MVCC.
+1. **Concurrent writes matter**: The pipeline writes events while the API serves queries. SQLite's write locking (even with WAL mode) creates contention that manifests as "database is locked" errors under load. PostgreSQL handles this natively with MVCC — multiple writers and readers operate without blocking each other.
 
 2. **Production-realistic architecture**: The problem statement evaluates "how you'd scale to 40 stores." Submitting with SQLite signals that I haven't considered production deployment. PostgreSQL with asyncpg demonstrates I understand async database patterns used in real FastAPI deployments.
 
-3. **ON CONFLICT clause**: PostgreSQL's `INSERT ... ON CONFLICT DO NOTHING` is the cleanest way to implement idempotent ingestion. SQLite supports this too, but the asyncpg driver ecosystem for FastAPI is more mature than aiosqlite.
+3. **ON CONFLICT clause**: PostgreSQL's `INSERT ... ON CONFLICT DO NOTHING` is the cleanest way to implement idempotent ingestion. Combined with asyncpg's native async support, this gives us non-blocking, replay-safe event ingestion.
 
-4. **Docker Compose alignment**: PostgreSQL has a first-class Docker image with built-in healthchecks (`pg_isready`). The docker-compose.yml becomes cleaner and more standard.
+4. **Docker Compose alignment**: PostgreSQL has a first-class Docker image with built-in healthchecks (`pg_isready`). The docker-compose.yml becomes cleaner with proper service dependency chains: postgres (healthy) → api → dashboard.
 
-I rejected TimescaleDB because our data volume (~50K events) doesn't justify the added complexity of hypertables and continuous aggregates. I would recommend TimescaleDB if scaling to 40+ stores with millions of daily events — and I document this in DESIGN.md as a scaling consideration.
+5. **JSONB for metadata**: The event schema includes a flexible `metadata` field (queue_depth, sku_zone, session_seq). PostgreSQL's JSONB type allows us to query inside this field efficiently, while SQLite would require text parsing.
+
+### What I Would Change at Scale
+I would recommend **TimescaleDB** (PostgreSQL extension) if scaling to 40+ stores with millions of daily events. Hypertables with time-based partitioning and continuous aggregates would make the metrics and funnel queries 10-100x faster. I didn't use it here because the operational overhead is unjustified for ~200 events across 4 cameras.
 
 I rejected ClickHouse because it's designed for analytical workloads at massive scale (billions of rows), and the operational overhead of running it for a hackathon would be counterproductive.
 
-The key insight: **choose the simplest technology that doesn't create a scaling dead-end**. PostgreSQL is that sweet spot between SQLite (too simple) and TimescaleDB/ClickHouse (too complex for current scale).
+**The key insight: choose the simplest technology that doesn't create a scaling dead-end.** PostgreSQL is that sweet spot between SQLite (too simple, locks under concurrent writes) and TimescaleDB/ClickHouse (too complex for current scale).

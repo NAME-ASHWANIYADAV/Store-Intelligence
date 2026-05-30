@@ -1,22 +1,23 @@
-# BoT-SORT Tracker Configuration for Store Intelligence
-# Tuned for retail CCTV person tracking with ReID
+# BoT-SORT Tracker Configuration — v2.0 (Tuned from 6 AI Research Sources)
+# Optimized for retail CCTV with heavy occlusion and ReID
 # Compatible with ultralytics 8.4.x
 
 tracker_type: botsort
 
 # Detection thresholds
-track_high_thresh: 0.5      # High confidence threshold for first association
-track_low_thresh: 0.1       # Low confidence threshold for second association
-new_track_thresh: 0.6       # Threshold for creating new tracks
-track_buffer: 45            # Frames to keep lost tracks (3 sec at 15fps)
-match_thresh: 0.8           # Matching threshold for association
+track_high_thresh: 0.5      # High confidence for 1st association
+track_low_thresh: 0.1       # Low confidence for 2nd association (catch occluded)
+new_track_thresh: 0.6       # Min conf to birth new track
+track_buffer: 90            # INCREASED: 90 frames ≈ 3.6s at 25fps (was 45)
+                            # Person can be occluded for 3.6s and re-associated
+match_thresh: 0.8           # IoU matching threshold
 fuse_score: true            # Fuse detection score with IoU
 
 # Camera Motion Compensation
 gmc_method: sparseOptFlow   # Handle slight camera vibration
 
-# ReID Configuration - ENABLED for identity retention
-proximity_thresh: 0.5
-appearance_thresh: 0.25
+# ReID Configuration — ENABLED for identity retention
+proximity_thresh: 0.5       # IoU gate for ReID evaluation
+appearance_thresh: 0.25     # Cosine distance threshold (lower = stricter)
 with_reid: true
 model: auto                 # Use YOLO11 native features for ReID

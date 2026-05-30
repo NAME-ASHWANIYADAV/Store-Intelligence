@@ -1,0 +1,170 @@
+# =============================================================================
+# Store Intelligence System v2.0 — Camera Configuration
+# Purplle Store BLR-001
+# All coordinates are NORMALIZED (0.0-1.0) for resolution independence
+# =============================================================================
+
+store_id: "STORE_BLR_001"
+fps_default: 25.0
+
+cameras:
+  # ─────────────────────────────────────────────────────────────────────────
+  # CAM 1: FLOOR — Skincare section (The Face Shop, Good Vibes, Derma Co)
+  # Shows: product shelves on left wall, customer browsing area center,
+  #        staff/billing counter area on far right
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: "CAM_01"
+    label: "Skincare Floor"
+    source: "CAM 1.mp4"
+    role: "floor"
+
+    ignore_regions: []  # Entire frame is inside the store
+
+    zones:
+      - id: "Z1_SKINCARE_WALL"
+        label: "Skincare Shelves (left wall)"
+        polygon: [[0.0, 0.05], [0.55, 0.05], [0.55, 0.85], [0.0, 0.85]]
+        dwell_threshold_sec: 5.0
+
+      - id: "Z1_CENTER_DISPLAY"
+        label: "Center Display Table"
+        polygon: [[0.30, 0.55], [0.65, 0.55], [0.65, 0.95], [0.30, 0.95]]
+        dwell_threshold_sec: 3.0
+
+    staff_zone:
+      # Staff stands behind the far-right counter (small area)
+      polygon: [[0.85, 0.25], [1.0, 0.25], [1.0, 0.60], [0.85, 0.60]]
+      threshold: 0.45  # 45% time threshold for staff (stricter)
+
+    tripwire: null
+
+    tracker_config:
+      track_buffer: 90
+      match_thresh: 0.8
+      track_high_thresh: 0.5
+      track_low_thresh: 0.1
+      new_track_thresh: 0.6
+      reid_enabled: true
+      appearance_thresh: 0.25
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CAM 2: FLOOR — Makeup section (Lakme, Swiss Beauty, Faces Canada,
+  #         Maybelline). Staff counter on left, makeup shelves on right wall.
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: "CAM_02"
+    label: "Makeup Floor"
+    source: "CAM 2.mp4"
+    role: "floor"
+
+    ignore_regions: []
+
+    zones:
+      - id: "Z2_MAKEUP_WALL"
+        label: "Makeup Shelves (right wall)"
+        polygon: [[0.30, 0.05], [1.0, 0.05], [1.0, 0.75], [0.30, 0.75]]
+        dwell_threshold_sec: 5.0
+
+      - id: "Z2_COUNTER"
+        label: "Staff Demo Counter (left)"
+        polygon: [[0.0, 0.15], [0.30, 0.15], [0.30, 0.75], [0.0, 0.75]]
+        dwell_threshold_sec: 3.0
+
+    staff_zone:
+      # Staff stands behind the demo table on the far left
+      polygon: [[0.0, 0.20], [0.15, 0.20], [0.15, 0.55], [0.0, 0.55]]
+      threshold: 0.45  # 45% time threshold for staff (stricter)
+
+    tripwire: null
+
+    tracker_config:
+      track_buffer: 90
+      match_thresh: 0.8
+      track_high_thresh: 0.5
+      track_low_thresh: 0.1
+      new_track_thresh: 0.6
+      reid_enabled: true
+      appearance_thresh: 0.25
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CAM 3: ENTRY — Glass door entrance
+  # Left side: inside the store (Purplle signboard, products visible)
+  # Right side: OUTSIDE (dark area = street/mall corridor through glass)
+  # Door threshold is roughly vertical ~55% from left
+  # People entering walk from RIGHT (outside) to LEFT (inside)
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: "CAM_03"
+    label: "Main Entry Glass Door"
+    source: "CAM 3.mp4"
+    role: "entry"
+
+    ignore_regions:
+      # The entire right portion is outside the store (dark glass/street)
+      - label: "outside_street"
+        polygon: [[0.62, 0.0], [1.0, 0.0], [1.0, 1.0], [0.62, 1.0]]
+
+    zones: []
+
+    # Tripwire line across the doorway
+    # Line runs roughly vertical at the glass door threshold
+    # Outside (right side) → Inside (left side)
+    tripwire:
+      point_a: [0.55, 0.10]    # top of door threshold
+      point_b: [0.55, 0.90]    # bottom of door threshold
+      inside_direction: "left"  # inside the store is to the LEFT of this line
+      min_crossing_frames: 3
+      cooldown_sec: 2.0
+      min_pixel_distance: 60.0
+
+    staff_zone: null
+
+    tracker_config:
+      track_buffer: 60
+      match_thresh: 0.8
+      track_high_thresh: 0.5
+      track_low_thresh: 0.1
+      new_track_thresh: 0.6
+      reid_enabled: true
+      appearance_thresh: 0.30
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CAM 4: STORAGE/BACKROOM — boxes, chair, backpacks, no customer area
+  # This camera should be DISABLED — it's not a retail analytics camera
+  # ─────────────────────────────────────────────────────────────────────────
+  # CAM 4 is intentionally excluded — it shows a backroom/storage area
+  # with no customer traffic. Including it would waste GPU compute.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CAM 5: BILLING — Counter area with laptop, product shelves on left,
+  #         hallway to backroom visible in center, accessories display right
+  # ─────────────────────────────────────────────────────────────────────────
+  - id: "CAM_05"
+    label: "Billing Counter"
+    source: "CAM 5.mp4"
+    role: "billing"
+
+    ignore_regions:
+      # Hallway to backroom — not a customer analytics area
+      - label: "backroom_hallway"
+        polygon: [[0.35, 0.10], [0.60, 0.10], [0.60, 0.85], [0.35, 0.85]]
+
+    zones:
+      - id: "Z5_BILLING"
+        label: "Billing Counter Area"
+        polygon: [[0.0, 0.10], [0.35, 0.10], [0.35, 0.90], [0.0, 0.90]]
+        dwell_threshold_sec: 0  # any presence at counter = billing event
+
+    staff_zone:
+      # Staff stands behind the billing counter
+      polygon: [[0.10, 0.20], [0.35, 0.20], [0.35, 0.60], [0.10, 0.60]]
+      threshold: 0.40
+
+    tripwire: null
+
+    tracker_config:
+      track_buffer: 150  # 5+ seconds (customers wait, staff moves around)
+      match_thresh: 0.8
+      track_high_thresh: 0.45
+      track_low_thresh: 0.1
+      new_track_thresh: 0.6
+      reid_enabled: true   # ENABLED — critical for small space dedup
+      appearance_thresh: 0.30
