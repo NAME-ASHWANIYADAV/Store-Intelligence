@@ -1,0 +1,105 @@
+{
+  "stores": {
+    "STORE_BLR_001": {
+      "name": "Apex Retail - Bangalore Koramangala",
+      "city": "Bangalore",
+      "open_hours": {"open": "10:00", "close": "21:00"},
+      "cameras": {
+        "CAM_ENTRY_01": {
+          "file": "CAM 1.mp4",
+          "type": "entry",
+          "zone_coverage": ["ENTRY_EXIT"],
+          "threshold_line": {
+            "start": [400, 500],
+            "end": [1500, 500],
+            "in_direction": "top_to_bottom"
+          }
+        },
+        "CAM_FLOOR_01": {
+          "file": "CAM 2.mp4",
+          "type": "floor",
+          "zone_coverage": ["SKINCARE", "HAIRCARE", "MAKEUP", "FRAGRANCE"]
+        },
+        "CAM_BILLING_01": {
+          "file": "CAM 3.mp4",
+          "type": "billing",
+          "zone_coverage": ["BILLING"]
+        }
+      },
+      "zones": {
+        "ENTRY_EXIT": {
+          "polygon": [[0, 0], [1920, 0], [1920, 1080], [0, 1080]],
+          "camera_id": "CAM_ENTRY_01"
+        },
+        "SKINCARE": {
+          "polygon": [[0, 0], [960, 0], [960, 540], [0, 540]],
+          "camera_id": "CAM_FLOOR_01"
+        },
+        "HAIRCARE": {
+          "polygon": [[960, 0], [1920, 0], [1920, 540], [960, 540]],
+          "camera_id": "CAM_FLOOR_01"
+        },
+        "MAKEUP": {
+          "polygon": [[0, 540], [960, 540], [960, 1080], [0, 1080]],
+          "camera_id": "CAM_FLOOR_01"
+        },
+        "FRAGRANCE": {
+          "polygon": [[960, 540], [1920, 540], [1920, 1080], [960, 1080]],
+          "camera_id": "CAM_FLOOR_01"
+        },
+        "BILLING": {
+          "polygon": [[0, 0], [1920, 0], [1920, 1080], [0, 1080]],
+          "camera_id": "CAM_BILLING_01"
+        }
+      }
+    },
+    "STORE_BLR_002": {
+      "name": "Apex Retail - Bangalore Indiranagar",
+      "city": "Bangalore",
+      "open_hours": {"open": "10:00", "close": "21:00"},
+      "cameras": {
+        "CAM_ENTRY_02": {
+          "file": "CAM 4.mp4",
+          "type": "entry",
+          "zone_coverage": ["ENTRY_EXIT"],
+          "threshold_line": {
+            "start": [400, 500],
+            "end": [1500, 500],
+            "in_direction": "top_to_bottom"
+          }
+        },
+        "CAM_FLOOR_02": {
+          "file": "CAM 5.mp4",
+          "type": "floor",
+          "zone_coverage": ["SKINCARE", "HAIRCARE", "MAKEUP", "FRAGRANCE", "BILLING"]
+        }
+      },
+      "zones": {
+        "ENTRY_EXIT": {
+          "polygon": [[0, 0], [1920, 0], [1920, 1080], [0, 1080]],
+          "camera_id": "CAM_ENTRY_02"
+        },
+        "SKINCARE": {
+          "polygon": [[0, 0], [640, 0], [640, 540], [0, 540]],
+          "camera_id": "CAM_FLOOR_02"
+        },
+        "HAIRCARE": {
+          "polygon": [[640, 0], [1280, 0], [1280, 540], [640, 540]],
+          "camera_id": "CAM_FLOOR_02"
+        },
+        "MAKEUP": {
+          "polygon": [[1280, 0], [1920, 0], [1920, 540], [1280, 540]],
+          "camera_id": "CAM_FLOOR_02"
+        },
+        "FRAGRANCE": {
+          "polygon": [[0, 540], [960, 540], [960, 1080], [0, 1080]],
+          "camera_id": "CAM_FLOOR_02"
+        },
+        "BILLING": {
+          "polygon": [[960, 540], [1920, 540], [1920, 1080], [960, 1080]],
+          "camera_id": "CAM_FLOOR_02"
+        }
+      }
+    }
+  }
+}

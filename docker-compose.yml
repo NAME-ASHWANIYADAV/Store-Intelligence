@@ -1,0 +1,88 @@
+# ============================================================
+# Store Intelligence System - Docker Compose
+# Services: api, postgres, redis, dashboard
+# One command: docker compose up -d
+# ============================================================
+version: "3.9"
+
+services:
+  # ===== FastAPI Backend =====
+  api:
+    build: .
+    container_name: store-intel-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://storeintel:storeintel_pass@postgres:5432/store_intelligence
+      - DATABASE_URL_SYNC=postgresql://storeintel:storeintel_pass@postgres:5432/store_intelligence
+      - REDIS_URL=redis://redis:6379/0
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DEBUG=false
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ===== PostgreSQL Database =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: store-intel-db
+    environment:
+      POSTGRES_DB: store_intelligence
+      POSTGRES_USER: storeintel
+      POSTGRES_PASSWORD: storeintel_pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U storeintel -d store_intelligence"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== Redis Cache =====
+  redis:
+    image: redis:7-alpine
+    container_name: store-intel-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===== Streamlit Dashboard =====
+  dashboard:
+    build: .
+    container_name: store-intel-dashboard
+    command: streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - API_URL=http://api:8000
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    driver: local
