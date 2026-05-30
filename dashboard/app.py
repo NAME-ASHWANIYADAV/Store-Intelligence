@@ -234,7 +234,8 @@ with st.sidebar:
 
 
 # ─── Load ─────────────────────────────────────────────────────────────────────
-df = load_events(str(JSONL_PATH))
+data_path = JSONL_PATH if JSONL_PATH.exists() else FALLBACK_PATH
+df = load_events(str(data_path))
 if df.empty:
     st.error("No data. Run the pipeline first.")
     st.stop()
